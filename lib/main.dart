@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const DivenaraApp());
@@ -15,7 +17,6 @@ class DivenaraApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.green,
-        scaffoldBackgroundColor: Colors.white,
       ),
       home: const HomePage(),
     );
@@ -32,52 +33,53 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int selectedIndex = 0;
 
-  double balance = 1250000;
-  double income = 1800000;
-  double expenses = 550000;
+  List<Map<String, dynamic>> transactions = [];
 
-  final List<Map<String, dynamic>> transactions = [
-    {
-      'title': 'Salary',
-      'category': 'Income',
-      'amount': 1800000.0,
-      'income': true,
-    },
-    {
-      'title': 'Food',
-      'category': 'Food',
-      'amount': 120000.0,
-      'income': false,
-    },
-    {
-      'title': 'Transport',
-      'category': 'Transport',
-      'amount': 80000.0,
-      'income': false,
-    },
-    {
-      'title': 'Electricity',
-      'category': 'Bills',
-      'amount': 150000.0,
-      'income': false,
-    },
-    {
-      'title': 'Shopping',
-      'category': 'Shopping',
-      'amount': 200000.0,
-      'income': false,
-    },
-  ];
+  double get income => transactions
+      .where((t) => t['type'] == 'income')
+      .fold(0.0, (sum, t) => sum + (t['amount'] as num).toDouble());
+
+  double get expenses => transactions
+      .where((t) => t['type'] == 'expense')
+      .fold(0.0, (sum, t) => sum + (t['amount'] as num).toDouble());
+
+  double get balance => income - expenses;
+
+  @override
+  void initState() {
+    super.initState();
+    loadData();
+  }
+
+  Future<void> loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('transactions');
+
+    if (saved != null) {
+      final decoded = jsonDecode(saved);
+
+      setState(() {
+        transactions = List<Map<String, dynamic>>.from(
+          decoded.map((item) => Map<String, dynamic>.from(item)),
+        );
+      });
+    }
+  }
+
+  Future<void> saveData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('transactions', jsonEncode(transactions));
+  }
 
   String money(double amount) {
     return 'TZS ${amount.toStringAsFixed(0)}';
   }
 
-  void addTransaction(bool isIncome) {
-    final titleController = TextEditingController();
+  Future<void> addTransaction(bool isIncome) async {
+    final descriptionController = TextEditingController();
     final amountController = TextEditingController();
 
-    showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (context) {
@@ -100,7 +102,7 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(height: 20),
               TextField(
-                controller: titleController,
+                controller: descriptionController,
                 decoration: const InputDecoration(
                   labelText: 'Description',
                   border: OutlineInputBorder(),
@@ -116,38 +118,38 @@ class _HomePageState extends State<HomePage> {
                   border: OutlineInputBorder(),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
-                child: FilledButton(
-                  onPressed: () {
+                child: ElevatedButton(
+                  onPressed: () async {
+                    final description =
+                        descriptionController.text.trim();
                     final amount =
-                        double.tryParse(amountController.text) ?? 0;
+                        double.tryParse(amountController.text.trim());
 
-                    if (titleController.text.trim().isEmpty || amount <= 0) {
+                    if (description.isEmpty ||
+                        amount == null ||
+                        amount <= 0) {
                       return;
                     }
 
                     setState(() {
                       transactions.insert(0, {
-                        'title': titleController.text.trim(),
-                        'category': isIncome ? 'Income' : 'Expense',
+                        'description': description,
                         'amount': amount,
-                        'income': isIncome,
+                        'type': isIncome ? 'income' : 'expense',
+                        'date': DateTime.now().toIso8601String(),
                       });
-
-                      if (isIncome) {
-                        income += amount;
-                        balance += amount;
-                      } else {
-                        expenses += amount;
-                        balance -= amount;
-                      }
                     });
 
-                    Navigator.pop(context);
+                    await saveData();
+
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                    }
                   },
-                  child: const Text('Save Transaction'),
+                  child: Text(isIncome ? 'Save Income' : 'Save Expense'),
                 ),
               ),
             ],
@@ -159,7 +161,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget dashboard() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -170,65 +172,74 @@ class _HomePageState extends State<HomePage> {
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 5),
-          const Text(
-            'Smarter Money. Brighter Future.',
-            style: TextStyle(color: Colors.grey),
-          ),
           const SizedBox(height: 20),
 
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              color: Colors.green.shade700,
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Total Balance',
-                  style: TextStyle(color: Colors.white70),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  money(balance),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 30,
-                    fontWeight: FontWeight.bold,
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Total Balance'),
+                  const SizedBox(height: 8),
+                  Text(
+                    money(balance),
+                    style: const TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
           Row(
             children: [
               Expanded(
-                child: _summaryCard(
-                  'Income',
-                  income,
-                  Icons.arrow_downward,
-                  Colors.green,
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        const Text('Income'),
+                        const SizedBox(height: 8),
+                        Text(
+                          money(income),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-              const SizedBox(width: 12),
               Expanded(
-                child: _summaryCard(
-                  'Expenses',
-                  expenses,
-                  Icons.arrow_upward,
-                  Colors.red,
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        const Text('Expenses'),
+                        const SizedBox(height: 8),
+                        Text(
+                          money(expenses),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
 
-          const SizedBox(height: 25),
+          const SizedBox(height: 20),
 
           const Text(
             'Quick Actions',
@@ -243,15 +254,15 @@ class _HomePageState extends State<HomePage> {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
+                child: ElevatedButton.icon(
                   onPressed: () => addTransaction(true),
                   icon: const Icon(Icons.add),
                   label: const Text('Income'),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
-                child: FilledButton.icon(
+                child: ElevatedButton.icon(
                   onPressed: () => addTransaction(false),
                   icon: const Icon(Icons.remove),
                   label: const Text('Expense'),
@@ -260,7 +271,7 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
 
-          const SizedBox(height: 25),
+          const SizedBox(height: 24),
 
           const Text(
             'Recent Transactions',
@@ -270,166 +281,48 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
+
+          if (transactions.isEmpty)
+            const Card(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: Center(
+                  child: Text('No transactions yet'),
+                ),
+              ),
+            ),
 
           ...transactions.take(5).map(
-                (transaction) => _transactionTile(transaction),
+                (transaction) => Card(
+                  child: ListTile(
+                    leading: Icon(
+                      transaction['type'] == 'income'
+                          ? Icons.arrow_downward
+                          : Icons.arrow_upward,
+                    ),
+                    title: Text(transaction['description']),
+                    trailing: Text(
+                      '${transaction['type'] == 'income' ? '+' : '-'} '
+                      '${money((transaction['amount'] as num).toDouble())}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
               ),
         ],
       ),
     );
   }
 
-  Widget _summaryCard(
-    String title,
-    double amount,
-    IconData icon,
-    Color color,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade200),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: color),
-          const SizedBox(height: 8),
-          Text(title),
-          const SizedBox(height: 4),
-          Text(
-            money(amount),
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 15,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _transactionTile(Map<String, dynamic> transaction) {
-    final bool isIncome = transaction['income'];
-
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: CircleAvatar(
-        backgroundColor:
-            isIncome ? Colors.green.shade100 : Colors.red.shade100,
-        child: Icon(
-          isIncome ? Icons.arrow_downward : Icons.arrow_upward,
-          color: isIncome ? Colors.green : Colors.red,
-        ),
-      ),
-      title: Text(transaction['title']),
-      subtitle: Text(transaction['category']),
-      trailing: Text(
-        '${isIncome ? '+' : '-'}${money(transaction['amount'])}',
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: isIncome ? Colors.green : Colors.red,
-        ),
-      ),
-    );
-  }
-
-  Widget transactionsPage() {
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        const Text(
-          'Transactions',
-          style: TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 15),
-        ...transactions.map(_transactionTile),
-      ],
-    );
-  }
-
-  Widget budgetPage() {
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        const Text(
-          'Budget',
-          style: TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 20),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Monthly Budget',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 15),
-                const LinearProgressIndicator(value: 0.55),
-                const SizedBox(height: 10),
-                Text('${money(expenses)} used'),
-                const Text('Budget: TZS 1,000,000'),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 15),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.savings),
-            title: const Text('Savings Goal'),
-            subtitle: const Text('Emergency Fund'),
-            trailing: const Text('45%'),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget morePage() {
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        const Text(
-          'More',
-          style: TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 15),
-        _moreTile(Icons.account_balance, 'Accounts'),
-        _moreTile(Icons.receipt_long, 'Bills'),
-        _moreTile(Icons.credit_card, 'Loans & Debt'),
-        _moreTile(Icons.trending_up, 'Investments'),
-        _moreTile(Icons.family_restroom, 'Family Finance'),
-        _moreTile(Icons.groups, 'Chama / VICOBA'),
-        _moreTile(Icons.settings, 'Settings'),
-      ],
-    );
-  }
-
-  Widget _moreTile(IconData icon, String title) {
-    return Card(
-      child: ListTile(
-        leading: Icon(icon, color: Colors.green.shade700),
-        title: Text(title),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () {},
+  Widget placeholder(String title) {
+    return Center(
+      child: Text(
+        '$title\nComing soon',
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 22),
       ),
     );
   }
@@ -438,13 +331,16 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final pages = [
       dashboard(),
-      transactionsPage(),
-      budgetPage(),
-      morePage(),
+      placeholder('Transactions'),
+      placeholder('Budget'),
+      placeholder('More'),
     ];
 
     return Scaffold(
-      body: SafeArea(child: pages[selectedIndex]),
+      appBar: AppBar(
+        title: const Text('Divenara'),
+      ),
+      body: pages[selectedIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
         onDestinationSelected: (index) {
