@@ -30,3 +30,4 @@ jobs:
         with:
           name: divenara-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          
